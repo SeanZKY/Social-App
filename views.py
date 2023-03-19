@@ -1,4 +1,8 @@
+from datetime import timedelta
 from pathlib import Path
+import pytz
+
+from django.http import HttpResponseNotModified
 from django.shortcuts import render
 from .HelperFunctions import *
 from .models import *
@@ -65,6 +69,7 @@ def site(request):  # The main site + searching users page - view user defines t
                     post = Post.objects.get(id=request.POST["delete_post"])
                     os.remove(Path(post.file.name))
                     post.delete()
+                    runner.update_row("last_update", str(datetime.now()), request.COOKIES.get('username'))
                 except ObjectDoesNotExist:
                     pass
             elif "comment" in list(request.POST.keys()):
@@ -109,6 +114,22 @@ def site(request):  # The main site + searching users page - view user defines t
             runner.remove_data("requesting", follow_name, user_name)
             runner.remove_data("requested", user_name, follow_name)
 
+    if "changes" in request.GET.keys():
+        if request.GET["changes"] == "":
+            if request.GET["status"] != helper_dict[runner.find_status(user_name, request.GET['view_user'])]:
+                return HttpResponse("need update")
+        else:
+            last_update = datetime.strptime(runner.ret_data("last_update", request.GET["view_user"]),
+                                            '%Y-%m-%d %H:%M:%S.%f' )
+            user_update = datetime.strptime(request.GET["changes"], '%Y-%m-%d %H:%M:%S.%f')
+            user_update = user_update.replace(tzinfo=pytz.utc)
+            last_update = last_update.replace(tzinfo=pytz.utc)
+            if last_update > user_update or request.GET["status"] != helper_dict[runner.find_status(user_name, request.GET['view_user'])]:
+                return HttpResponse("need update")
+
+            else:
+                return HttpResponseNotModified()
+
     if len(runner.find_from_name(request.GET['view_user'])) == ZERO_MATCHES:
         return enter_site('twitter.html', request)
     if status == "Following":
@@ -125,14 +146,14 @@ def pfp(request):  # let the user choose a profile picture
         return redirect("/signin/")
 
     if request.method == 'POST':
-        form = BlogForm(request.POST, request.FILES)
+        form = PictureForm(request.POST, request.FILES)
         file_type = request.FILES['file'].name.split(".")[-1]
         request.FILES['file'].name = request.COOKIES.get('username') + "-" + \
             "ProfilePicture" + "."
         if os.path.exists(request.COOKIES.get('username')) and Path(request.COOKIES.get('username') + "//" +
                                                                     request.FILES['file'].name + "jpg").is_file():
             os.remove(Path(request.COOKIES.get('username') + "//" + request.FILES['file'].name + "jpg"))
-            for profile_pic in Blog.objects.all():
+            for profile_pic in ProfilePicture.objects.all():
                 if request.COOKIES.get('username') + "/" + request.COOKIES.get('username') + "-" + "ProfilePicture." \
                         + "jpg" == profile_pic.file.name:
                     profile_pic.delete()
@@ -140,7 +161,7 @@ def pfp(request):  # let the user choose a profile picture
         if os.path.exists(request.COOKIES.get('username')) and Path(request.COOKIES.get('username') + "//" +
                                                                     request.FILES['file'].name + "png").is_file():
             os.remove(Path(request.COOKIES.get('username') + "//" + request.FILES['file'].name + "png"))
-            for profile_pic in Blog.objects.all():
+            for profile_pic in ProfilePicture.objects.all():
                 if request.COOKIES.get('username') + "/" + request.COOKIES.get('username') + "-" + "ProfilePicture." \
                         + "png" == profile_pic.file.name:
                     profile_pic.delete()
@@ -150,8 +171,10 @@ def pfp(request):  # let the user choose a profile picture
             helper.username = request.COOKIES.get('username')
             helper.save()
             return enter_site("Pfp.html", request, {'form': form})
+        return enter_site("Pfp.html", request, {'form': form})
+
     else:
-        form = BlogForm()
+        form = PictureForm()
         return enter_site("Pfp.html", request, {'form': form})
 
 
@@ -175,12 +198,13 @@ def newpost(request):  # receive a post from the user
             helper = form.save(commit=False)
             helper.username = request.COOKIES.get('username')
             helper.save()
-
-            return enter_site("post.html", request, {'form': form})
+            runner = ManageDatabase()
+            runner.update_row("last_update", str(datetime.now()), request.COOKIES.get('username'))
+            return enter_site("post.html", request, {'form': form, 'message': "Posted"})
     else:
         form = PostForm()
         return enter_site("post.html", request, {'form': form})
-    return enter_site('post.html', request)
+    return enter_site("post.html", request, {'form': form})
 
 
 def myposts(request):  # user posts redirect
